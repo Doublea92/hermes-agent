@@ -718,6 +718,117 @@ class DashboardHealth:
 DASHBOARD_HEALTH = DashboardHealth()
 
 
+# ---------------------------------------------------------------------------
+# Dashboard browser voice performance — bounded in-process telemetry for the
+# audio endpoints that make up the backend side of Jarvis/Benson voice turns.
+# Payloads deliberately contain only timings/counts/sizes/provider labels; no
+# transcript text, synthesized text, paths, tokens, or exception messages.
+# ---------------------------------------------------------------------------
+
+_VOICE_PERF_MAX_EVENTS = 240
+_VOICE_PERF_WINDOW_SECONDS = 3600.0
+
+
+@dataclass
+class VoicePerfEvent:
+    at: float
+    route: str
+    stage: str
+    elapsed_ms: float
+    ok: bool
+    provider: Optional[str] = None
+    audio_bytes: Optional[int] = None
+    text_chars: Optional[int] = None
+    profile: Optional[str] = None
+    error_type: Optional[str] = None
+
+
+_VOICE_PERF_EVENTS: "deque[VoicePerfEvent]" = deque(maxlen=_VOICE_PERF_MAX_EVENTS)
+_VOICE_PERF_LOCK = threading.Lock()
+
+
+def _voice_perf_record(
+    *,
+    route: str,
+    stage: str,
+    elapsed_ms: float,
+    ok: bool,
+    provider: Optional[str] = None,
+    audio_bytes: Optional[int] = None,
+    text_chars: Optional[int] = None,
+    profile: Optional[str] = None,
+    error_type: Optional[str] = None,
+) -> None:
+    event = VoicePerfEvent(
+        at=time.time(),
+        route=route,
+        stage=stage,
+        elapsed_ms=round(max(0.0, elapsed_ms), 2),
+        ok=bool(ok),
+        provider=(provider or None),
+        audio_bytes=audio_bytes,
+        text_chars=text_chars,
+        profile=(profile or None),
+        error_type=(error_type or None),
+    )
+    with _VOICE_PERF_LOCK:
+        _VOICE_PERF_EVENTS.append(event)
+
+
+def _voice_perf_percentile(values: List[float], percentile: float) -> Optional[float]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, math.ceil((percentile / 100.0) * len(ordered)) - 1))
+    return round(ordered[index], 2)
+
+
+def _voice_perf_snapshot(limit: int = 40) -> Dict[str, Any]:
+    cutoff = time.time() - _VOICE_PERF_WINDOW_SECONDS
+    with _VOICE_PERF_LOCK:
+        events = [event for event in _VOICE_PERF_EVENTS if event.at >= cutoff]
+
+    buckets: Dict[str, List[VoicePerfEvent]] = {}
+    for event in events:
+        buckets.setdefault(f"{event.route}:{event.stage}", []).append(event)
+
+    summary: Dict[str, Dict[str, Any]] = {}
+    for key, bucket in sorted(buckets.items()):
+        values = [event.elapsed_ms for event in bucket]
+        summary[key] = {
+            "count": len(bucket),
+            "failures": sum(1 for event in bucket if not event.ok),
+            "p50_ms": _voice_perf_percentile(values, 50),
+            "p90_ms": _voice_perf_percentile(values, 90),
+            "p95_ms": _voice_perf_percentile(values, 95),
+            "latest_ms": values[-1] if values else None,
+            "providers": sorted({event.provider for event in bucket if event.provider}),
+        }
+
+    recent = [
+        {
+            "at": datetime.fromtimestamp(event.at, timezone.utc).isoformat(),
+            "route": event.route,
+            "stage": event.stage,
+            "elapsed_ms": event.elapsed_ms,
+            "ok": event.ok,
+            "provider": event.provider,
+            "audio_bytes": event.audio_bytes,
+            "text_chars": event.text_chars,
+            "profile": event.profile,
+            "error_type": event.error_type,
+        }
+        for event in events[-max(1, min(limit, 100)):]
+    ]
+    return {
+        "ok": True,
+        "window_seconds": _VOICE_PERF_WINDOW_SECONDS,
+        "event_count": len(events),
+        "summary": summary,
+        "recent": recent,
+    }
+
+
 @app.middleware("http")
 async def _dashboard_health_middleware(request: Request, call_next):
     """Outermost middleware: count unhandled exceptions and 5xx responses.
@@ -3393,6 +3504,44 @@ async def get_system_stats():
     return info
 
 
+@app.get("/api/jarvis/overview")
+async def get_jarvis_overview():
+    """Read-only Jarvis cockpit aggregate for the dashboard.
+
+    This endpoint composes safe status/count sources for the dashboard page. It
+    intentionally returns only status enums, counts, task titles/ids, sanitized
+    source availability, and documented product summaries — no env values,
+    credential-pool content, raw logs, session message bodies, or mutation
+    affordances.
+    """
+    from hermes_cli.jarvis_dashboard import build_jarvis_overview
+
+    status_payload = await get_status()
+    system_payload = await get_system_stats()
+    cron_jobs = None
+    try:
+        cron_jobs = await list_cron_jobs("all")
+    except Exception:
+        _log.debug("Jarvis overview cron summary unavailable", exc_info=True)
+
+    try:
+        return await asyncio.get_running_loop().run_in_executor(
+            None,
+            functools.partial(
+                build_jarvis_overview,
+                status_payload,
+                system_payload,
+                cron_jobs,
+            ),
+        )
+    except ValueError as exc:
+        _log.warning("Jarvis overview blocked unsafe payload: %s", exc)
+        raise HTTPException(status_code=500, detail="Jarvis overview failed safety validation")
+    except Exception:
+        _log.exception("GET /api/jarvis/overview failed")
+        raise HTTPException(status_code=500, detail="Jarvis overview unavailable")
+
+
 # ---------------------------------------------------------------------------
 # Curator endpoints — background skill-maintenance status + controls.
 #
@@ -4187,6 +4336,12 @@ async def check_hermes_update(force: bool = False):
     return payload
 
 
+@app.get("/api/audio/performance")
+async def get_audio_performance(limit: int = 40):
+    """Return bounded backend voice latency telemetry for dashboard diagnostics."""
+    return _voice_perf_snapshot(limit=limit)
+
+
 @app.post("/api/audio/transcribe")
 async def transcribe_audio_upload(
     payload: AudioTranscriptionRequest, profile: Optional[str] = None
@@ -4213,10 +4368,28 @@ async def transcribe_audio_upload(
             status_code=400, detail="Payload must be an audio recording"
         )
 
+    total_start = time.perf_counter()
+    decode_start = time.perf_counter()
     try:
         audio_bytes = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError):
+        _voice_perf_record(
+            route="/api/audio/transcribe",
+            stage="decode",
+            elapsed_ms=(time.perf_counter() - decode_start) * 1000.0,
+            ok=False,
+            profile=profile,
+            error_type="invalid_base64",
+        )
         raise HTTPException(status_code=400, detail="Audio payload is not valid base64")
+    _voice_perf_record(
+        route="/api/audio/transcribe",
+        stage="decode",
+        elapsed_ms=(time.perf_counter() - decode_start) * 1000.0,
+        ok=True,
+        audio_bytes=len(audio_bytes),
+        profile=profile,
+    )
 
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Audio recording is empty")
@@ -4225,6 +4398,7 @@ async def transcribe_audio_upload(
 
     temp_path = ""
     try:
+        write_start = time.perf_counter()
         suffix = _audio_extension_for_mime(mime_type)
         with tempfile.NamedTemporaryFile(
             prefix="hermes-desktop-voice-",
@@ -4233,6 +4407,14 @@ async def transcribe_audio_upload(
         ) as tmp:
             tmp.write(audio_bytes)
             temp_path = tmp.name
+        _voice_perf_record(
+            route="/api/audio/transcribe",
+            stage="temp_write",
+            elapsed_ms=(time.perf_counter() - write_start) * 1000.0,
+            ok=True,
+            audio_bytes=len(audio_bytes),
+            profile=profile,
+        )
 
         # transcribe_recording (not raw transcribe_audio): filters Whisper
         # hallucinations and maps provider "empty transcript" errors to a
@@ -4250,10 +4432,39 @@ async def transcribe_audio_upload(
                 return transcribe_recording(temp_path)
 
         loop = asyncio.get_running_loop()
+        stt_start = time.perf_counter()
         result = await loop.run_in_executor(None, _transcribe_scoped)
+        _voice_perf_record(
+            route="/api/audio/transcribe",
+            stage="stt_provider",
+            elapsed_ms=(time.perf_counter() - stt_start) * 1000.0,
+            ok=bool(result.get("success")),
+            provider=result.get("provider"),
+            audio_bytes=len(audio_bytes),
+            profile=profile,
+            error_type=None if result.get("success") else "provider_failed",
+        )
     except HTTPException:
+        _voice_perf_record(
+            route="/api/audio/transcribe",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+            ok=False,
+            audio_bytes=len(audio_bytes) if "audio_bytes" in locals() else None,
+            profile=profile,
+            error_type="http_exception",
+        )
         raise
     except Exception as exc:
+        _voice_perf_record(
+            route="/api/audio/transcribe",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+            ok=False,
+            audio_bytes=len(audio_bytes) if "audio_bytes" in locals() else None,
+            profile=profile,
+            error_type=type(exc).__name__,
+        )
         _log.exception("Desktop voice transcription failed")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
     finally:
@@ -4271,12 +4482,42 @@ async def transcribe_audio_upload(
         # the client quietly re-listens instead of surfacing a "transcription
         # failed" toast on every silent gap.
         if "empty transcript" in err.lower():
+            _voice_perf_record(
+                route="/api/audio/transcribe",
+                stage="total",
+                elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+                ok=True,
+                provider=result.get("provider"),
+                audio_bytes=len(audio_bytes),
+                profile=profile,
+            )
             return {"ok": True, "transcript": "", "provider": result.get("provider")}
+        _voice_perf_record(
+            route="/api/audio/transcribe",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+            ok=False,
+            provider=result.get("provider"),
+            audio_bytes=len(audio_bytes),
+            profile=profile,
+            error_type="provider_failed",
+        )
         raise HTTPException(status_code=400, detail=err)
 
+    transcript = str(result.get("transcript") or "").strip()
+    _voice_perf_record(
+        route="/api/audio/transcribe",
+        stage="total",
+        elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+        ok=True,
+        provider=result.get("provider"),
+        audio_bytes=len(audio_bytes),
+        text_chars=len(transcript),
+        profile=profile,
+    )
     return {
         "ok": True,
-        "transcript": str(result.get("transcript") or "").strip(),
+        "transcript": transcript,
         "provider": result.get("provider"),
     }
 
@@ -4380,6 +4621,15 @@ async def get_elevenlabs_voices(profile: Optional[str] = None):
     voices.sort(key=lambda item: str(item.get("label") or "").lower())
     return {"available": True, "voices": voices}
 
+FREE_DASHBOARD_EDGE_VOICES = {
+    "en-US-BrianNeural",
+    "en-US-AndrewNeural",
+    "en-US-GuyNeural",
+    "en-US-ChristopherNeural",
+    "en-US-SteffanNeural",
+    "en-US-AriaNeural",
+}
+
 
 @app.post("/api/audio/speak")
 async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
@@ -4394,33 +4644,83 @@ async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
     if not text:
         raise HTTPException(status_code=400, detail="Text is required")
 
+    total_start = time.perf_counter()
+    requested_provider = (payload.provider or "").strip().lower()
+    requested_voice = (payload.voice or "").strip()
     try:
-        from tools.tts_tool import text_to_speech_tool
-
-        def _speak_scoped():
-            # Home-only scope (contextvar), NOT _profile_scope: synthesis
-            # blocks for the provider round-trip and only needs config/.env
-            # resolution, so the task-local override inside this worker
-            # thread is sufficient (same reasoning as the MCP probe scope).
-            with _config_profile_scope(profile):
-                return text_to_speech_tool(text)
-
         loop = asyncio.get_running_loop()
-        result_json = await loop.run_in_executor(None, _speak_scoped)
+        synth_start = time.perf_counter()
+        if requested_provider == "edge" and requested_voice:
+            if requested_voice not in FREE_DASHBOARD_EDGE_VOICES:
+                raise HTTPException(status_code=400, detail="Unsupported free Edge voice")
+            from tools.tts_tool import _generate_edge_tts, _load_tts_config
+
+            output_path = str(Path(tempfile.gettempdir()) / f"hermes-jarvis-voice-{secrets.token_hex(8)}.mp3")
+            tts_config = dict(_load_tts_config())
+            tts_config["edge"] = {**(tts_config.get("edge") or {}), "voice": requested_voice}
+            if payload.speed is not None:
+                tts_config["speed"] = max(0.25, min(4.0, float(payload.speed)))
+            await _generate_edge_tts(text, output_path, tts_config)
+            result = {"success": True, "file_path": output_path, "provider": "edge", "voice": requested_voice}
+        else:
+            from tools.tts_tool import text_to_speech_tool
+
+            def _speak_scoped():
+                # Home-only scope (contextvar), NOT _profile_scope: synthesis
+                # blocks for the provider round-trip and only needs config/.env
+                # resolution, so the task-local override inside this worker
+                # thread is sufficient (same reasoning as the MCP probe scope).
+                with _config_profile_scope(profile):
+                    return text_to_speech_tool(text, speed=payload.speed, provider=payload.provider)
+
+            result_json = await loop.run_in_executor(None, _speak_scoped)
+            result = json.loads(result_json) if isinstance(result_json, str) else result_json
+        _voice_perf_record(
+            route="/api/audio/speak",
+            stage="tts_provider",
+            elapsed_ms=(time.perf_counter() - synth_start) * 1000.0,
+            ok=True,
+            provider=result.get("provider"),
+            text_chars=len(text),
+            profile=profile,
+        )
     except HTTPException:
+        _voice_perf_record(
+            route="/api/audio/speak",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+            ok=False,
+            text_chars=len(text),
+            profile=profile,
+            error_type="http_exception",
+        )
         # _config_profile_scope raises 400/404 for a bad profile — pass it
         # through instead of masking it as a 500 synthesis failure.
         raise
     except Exception as exc:
+        _voice_perf_record(
+            route="/api/audio/speak",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+            ok=False,
+            text_chars=len(text),
+            profile=profile,
+            error_type=type(exc).__name__,
+        )
         _log.exception("Desktop voice TTS failed")
         raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {exc}")
 
-    try:
-        result = json.loads(result_json) if isinstance(result_json, str) else result_json
-    except Exception:
-        raise HTTPException(status_code=500, detail="Invalid TTS response")
-
     if not result.get("success"):
+        _voice_perf_record(
+            route="/api/audio/speak",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+            ok=False,
+            provider=result.get("provider"),
+            text_chars=len(text),
+            profile=profile,
+            error_type="provider_failed",
+        )
         raise HTTPException(
             status_code=400,
             detail=result.get("error") or "Speech synthesis failed",
@@ -4439,10 +4739,21 @@ async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
         ".flac": "audio/flac",
     }.get(ext, "audio/mpeg")
 
+    read_start = time.perf_counter()
     try:
         with open(file_path, "rb") as fh:
             audio_bytes = fh.read()
     except OSError as exc:
+        _voice_perf_record(
+            route="/api/audio/speak",
+            stage="audio_read",
+            elapsed_ms=(time.perf_counter() - read_start) * 1000.0,
+            ok=False,
+            provider=result.get("provider"),
+            text_chars=len(text),
+            profile=profile,
+            error_type=type(exc).__name__,
+        )
         raise HTTPException(status_code=500, detail=f"Could not read audio: {exc}")
     finally:
         try:
@@ -4450,12 +4761,44 @@ async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
         except OSError:
             pass
 
+    _voice_perf_record(
+        route="/api/audio/speak",
+        stage="audio_read",
+        elapsed_ms=(time.perf_counter() - read_start) * 1000.0,
+        ok=True,
+        provider=result.get("provider"),
+        audio_bytes=len(audio_bytes),
+        text_chars=len(text),
+        profile=profile,
+    )
+    encode_start = time.perf_counter()
     encoded = base64.b64encode(audio_bytes).decode("ascii")
+    _voice_perf_record(
+        route="/api/audio/speak",
+        stage="encode",
+        elapsed_ms=(time.perf_counter() - encode_start) * 1000.0,
+        ok=True,
+        provider=result.get("provider"),
+        audio_bytes=len(audio_bytes),
+        text_chars=len(text),
+        profile=profile,
+    )
+    _voice_perf_record(
+        route="/api/audio/speak",
+        stage="total",
+        elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
+        ok=True,
+        provider=result.get("provider"),
+        audio_bytes=len(audio_bytes),
+        text_chars=len(text),
+        profile=profile,
+    )
     return {
         "ok": True,
         "data_url": f"data:{mime_type};base64,{encoded}",
         "mime_type": mime_type,
         "provider": result.get("provider"),
+        "voice": result.get("voice") or requested_voice or None,
     }
 
 
@@ -4512,6 +4855,9 @@ async def speak_stream_ws(ws: "WebSocket") -> None:
         await ws.close(code=4403)
         return
     await ws.accept()
+    stream_total_start = time.perf_counter()
+    stream_chunk_count = 0
+    stream_first_chunk_sent = False
 
     # Profile via query param, like /api/pty and /api/console: the provider
     # chain + API keys must resolve from the requesting profile's config, not
@@ -4537,6 +4883,13 @@ async def speak_stream_ws(ws: "WebSocket") -> None:
         _log.exception("speak-stream provider resolution failed")
         streamer, cap = None, 0
     if streamer is None:
+        _voice_perf_record(
+            route="/api/audio/speak-stream",
+            stage="fallback",
+            elapsed_ms=(time.perf_counter() - stream_total_start) * 1000.0,
+            ok=True,
+            profile=profile,
+        )
         with contextlib.suppress(Exception):
             await ws.send_json({"type": "fallback"})
             await ws.close()
@@ -4544,6 +4897,14 @@ async def speak_stream_ws(ws: "WebSocket") -> None:
 
     await ws.send_json(
         {"type": "start", "sample_rate": streamer.sample_rate, "channels": streamer.channels}
+    )
+    _voice_perf_record(
+        route="/api/audio/speak-stream",
+        stage="start",
+        elapsed_ms=(time.perf_counter() - stream_total_start) * 1000.0,
+        ok=True,
+        provider=type(streamer).__name__,
+        profile=profile,
     )
 
     stop = threading.Event()
@@ -4627,11 +4988,32 @@ async def speak_stream_ws(ws: "WebSocket") -> None:
             if chunk is None:
                 break
             await ws.send_bytes(chunk)
+            stream_chunk_count += 1
+            if not stream_first_chunk_sent:
+                stream_first_chunk_sent = True
+                _voice_perf_record(
+                    route="/api/audio/speak-stream",
+                    stage="first_chunk",
+                    elapsed_ms=(time.perf_counter() - stream_total_start) * 1000.0,
+                    ok=True,
+                    provider=type(streamer).__name__,
+                    audio_bytes=len(chunk),
+                    profile=profile,
+                )
         if not stop.is_set():
             await ws.send_json({"type": "end"})
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
+        _voice_perf_record(
+            route="/api/audio/speak-stream",
+            stage="total",
+            elapsed_ms=(time.perf_counter() - stream_total_start) * 1000.0,
+            ok=stream_first_chunk_sent or stop.is_set(),
+            provider=type(streamer).__name__,
+            audio_bytes=stream_chunk_count,
+            profile=profile,
+        )
         stop.set()
         text_q.put(None)
         pump.cancel()
