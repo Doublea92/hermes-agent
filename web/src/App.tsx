@@ -96,6 +96,7 @@ const WebhooksPage = lazy(() => import("@/pages/WebhooksPage"));
 const SystemPage = lazy(() => import("@/pages/SystemPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const JarvisPage = lazy(() => import("@/pages/JarvisPage"));
+const JarvisApprovalCenterPage = lazy(() => import("@/pages/JarvisApprovalCenterPage"));
 const JarvisMemoryPage = lazy(() => import("@/pages/JarvisMemoryPage"));
 const JarvisAgentsPage = lazy(() => import("@/pages/JarvisAgentsPage"));
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -159,6 +160,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/benson": RootRedirect,
   "/jarvis": JarvisPage,
+  "/jarvis/approvals": JarvisApprovalCenterPage,
   "/jarvis/memory": JarvisMemoryPage,
   "/jarvis/agents": JarvisAgentsPage,
   "/sessions": SessionsPage,
@@ -191,6 +193,7 @@ function ChatRouteSink() {
 
 const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/jarvis", label: "Jarvis", icon: Sparkles },
+  { path: "/jarvis/approvals", label: "Approvals", icon: ShieldCheck },
   {
     path: "/sessions",
     labelKey: "sessions",
