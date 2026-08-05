@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("./JarvisPage.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("./jarvis-dashboard.css", import.meta.url), "utf8");
 
 describe("JarvisPage prototype dashboard integration", () => {
@@ -13,6 +14,7 @@ describe("JarvisPage prototype dashboard integration", () => {
     expect(source).toContain("dashboard-shell");
     expect(css).toContain(".dashboard-shell");
     expect(css).toContain(".command-center");
+    expect(appSource).toContain('"/benson": RootRedirect');
   });
 
   it("keeps Memory and Agent Operations as distinct primary screens under /jarvis", () => {
@@ -115,5 +117,20 @@ describe("JarvisPage prototype dashboard integration", () => {
     expect(source).not.toContain("<strong>1.8 TB</strong>");
     expect(source).not.toContain("<strong>12,842</strong>");
     expect(source).not.toContain("<strong>184</strong>");
+  });
+
+  it("surfaces explicit operational health and a persistent reduced-motion control", () => {
+    expect(source).toContain('aria-label="Benson operational status"');
+    expect(source).toContain("Dashboard<small>{dashboardState}");
+    expect(source).toContain("Gateway<small>{gatewayState}");
+    expect(source).toContain("CPU<small>{cpuPercent}%");
+    expect(source).toContain("Memory<small>{ramPercent}%");
+    expect(source).toContain("Disk<small>{diskPercent}%");
+    expect(source).toContain("Network<small>");
+    expect(source).toContain('window.localStorage.setItem("benson-reduced-motion"');
+    expect(source).toContain("reducedMotion={reducedMotion}");
+    expect(css).toContain(".status-ribbon");
+    expect(css).toContain(".motion-reduced");
+    expect(css).toContain("@media (max-width: 1400px)");
   });
 });

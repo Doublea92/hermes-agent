@@ -2125,6 +2125,12 @@ export interface JarvisOverview {
       disk_percent?: number | null;
       uptime_seconds?: number | null;
       psutil?: boolean | null;
+      network?: {
+        bytes_sent?: number | null;
+        bytes_recv?: number | null;
+        interfaces_up?: number | null;
+        interfaces_total?: number | null;
+      } | null;
     };
     cron: {
       available: boolean;

@@ -151,6 +151,78 @@
   animation: sync-spin 0.9s linear infinite;
 }
 
+.status-ribbon {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  width: min(calc(100% - 48px), 1532px);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px auto 0;
+}
+
+.status-ribbon > div,
+.status-ribbon > button {
+  display: flex;
+  min-width: 0;
+  min-height: 54px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--dash-line);
+  background: rgba(4, 14, 23, 0.82);
+  color: #71dcf7;
+  font: 11px var(--dash-mono);
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.status-ribbon > button {
+  cursor: pointer;
+}
+
+.status-ribbon > button:hover,
+.status-ribbon > button.is-active {
+  border-color: var(--dash-line-strong);
+  background: rgba(52, 194, 236, 0.08);
+}
+
+.status-ribbon svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  stroke-width: 1.4;
+}
+
+.status-ribbon span {
+  min-width: 0;
+}
+
+.status-ribbon small {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #e9fbff;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-ribbon [data-tone="green"] svg { color: #6ceb8e; }
+.status-ribbon [data-tone="amber"] svg { color: #e8b766; }
+.status-ribbon [data-tone="red"] svg { color: #ed6a78; }
+
+.motion-reduced *,
+.motion-reduced *::before,
+.motion-reduced *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
 .dashboard-grid {
   position: relative;
   z-index: 2;
@@ -1202,7 +1274,11 @@
   stroke-width: 1.35;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1400px) {
+  .status-ribbon {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .dashboard-topbar {
     grid-template-columns: 1fr auto;
   }
@@ -1237,6 +1313,11 @@
 }
 
 @media (max-width: 820px) {
+  .status-ribbon {
+    width: calc(100% - 24px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-topbar {
     min-height: 70px;
     padding: 0 15px;

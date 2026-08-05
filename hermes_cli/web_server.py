@@ -3482,6 +3482,17 @@ async def get_system_stats():
         except Exception:
             pass
         try:
+            network = psutil.net_io_counters()
+            interface_stats = psutil.net_if_stats()
+            info["network"] = {
+                "bytes_sent": network.bytes_sent,
+                "bytes_recv": network.bytes_recv,
+                "interfaces_up": sum(1 for stats in interface_stats.values() if stats.isup),
+                "interfaces_total": len(interface_stats),
+            }
+        except Exception:
+            pass
+        try:
             proc = psutil.Process()
             info["process"] = {
                 "pid": proc.pid,

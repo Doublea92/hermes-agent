@@ -81,10 +81,19 @@ def test_build_jarvis_overview_uses_explicit_boards(monkeypatch, tmp_path):
                 "platforms": {"status": "ok", "configured": 1, "connected": 1},
             },
         },
-        {"psutil": False},
+        {
+            "psutil": True,
+            "network": {"bytes_sent": 1024, "bytes_recv": 2048, "interfaces_up": 2, "interfaces_total": 3},
+        },
         [],
     )
 
+    assert overview["service_health"]["system"]["network"] == {
+        "bytes_sent": 1024,
+        "bytes_recv": 2048,
+        "interfaces_up": 2,
+        "interfaces_total": 3,
+    }
     assert overview["todos"][0]["id"] == task_id
     assert overview["todos"][0]["board"] == "jarvis-dashboard"
     assert overview["todos"][0]["attention_action"] == "Answer needed"

@@ -6,6 +6,7 @@ import { GatewayClient } from "@/lib/gatewayClient";
 import { api, type JarvisOverview } from "@/lib/api";
 import "./jarvis-dashboard.css";
 import {
+  Accessibility,
   Activity,
   Bot,
   Box,
@@ -222,7 +223,7 @@ function voiceEnvelope(time) {
   };
 }
 
-function VoiceCoreField({ speaking, activeNode, onSelectNode, onToggleSpeaking, nodes = serviceNodes }) {
+function VoiceCoreField({ speaking, activeNode, onSelectNode, onToggleSpeaking, nodes = serviceNodes, reducedMotion = false }) {
   const canvasRef = useRef(null);
   const stageRef = useRef(null);
   const externalFrame = useRef(null);
@@ -248,7 +249,7 @@ function VoiceCoreField({ speaking, activeNode, onSelectNode, onToggleSpeaking, 
     if (!canvas || !stage) return undefined;
 
     const context = canvas.getContext("2d");
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduceMotion = reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let width = 0;
     let height = 0;
     let ratio = 1;
@@ -459,7 +460,7 @@ function VoiceCoreField({ speaking, activeNode, onSelectNode, onToggleSpeaking, 
       window.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [activeNode, speaking, nodes]);
+  }, [activeNode, speaking, nodes, reducedMotion]);
 
   return (
     <div className="core-stage" ref={stageRef}>
@@ -540,6 +541,10 @@ export default function JarvisPage() {
   const [synced, setSynced] = useState(false);
   const [overview, setOverview] = useState<JarvisOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    const saved = window.localStorage.getItem("benson-reduced-motion");
+    return saved === "true" || (saved === null && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  });
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
@@ -685,6 +690,11 @@ export default function JarvisPage() {
   const serviceHealth = overview?.service_health;
   const agentStatus = overview?.agent_status;
   const diskPercent = formatPercent(serviceHealth?.system?.disk_percent, memoryVault?.configured ? 45 : 0);
+  const cpuPercent = formatPercent(serviceHealth?.system?.cpu_percent, 0);
+  const ramPercent = formatPercent(serviceHealth?.system?.memory_percent, 0);
+  const networkHealth = serviceHealth?.system?.network;
+  const gatewayState = serviceHealth?.gateway?.state || agentStatus?.gateway_state || "unknown";
+  const dashboardState = overviewError ? "error" : serviceHealth?.dashboard?.status || (overview ? "ok" : "loading");
   const memoryStatus = overviewError ? "Unavailable" : memoryVault?.status === "setup_needed" ? "Setup needed" : memoryVault?.status === "available" ? "Healthy" : "Loading";
   const memoryTone = overviewError || memoryVault?.status === "unavailable" ? "red" : memoryVault?.status === "setup_needed" ? "amber" : "green";
   const activeAgentCount = agentStatus?.active_agents ?? 0;
@@ -699,41 +709,6 @@ export default function JarvisPage() {
   const sync = () => {
     setSynced(true);
     window.setTimeout(() => setSynced(false), 1000);
-  };
-
-  const speakBensonStatus = async () => {
-    if (speaking) {
-      voiceAudioRef.current?.pause();
-      voiceAudioRef.current = null;
-      setSpeaking(false);
-      setVoiceStatus("Benson playback stopped");
-      return;
-    }
-
-    setSpeaking(true);
-    setVoiceStatus("Synthesizing Benson voice…");
-    try {
-      const response = await api.speakText(
-        "Benson is online on the Jarvis dashboard. Voice playback is connected in this browser.",
-      );
-      const audio = new Audio(response.data_url);
-      voiceAudioRef.current = audio;
-      audio.onended = () => {
-        if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
-        setSpeaking(false);
-        setVoiceStatus(`Benson voice ready${response.provider ? ` via ${response.provider}` : ""}`);
-      };
-      audio.onerror = () => {
-        if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
-        setSpeaking(false);
-        setVoiceStatus("Browser could not play Benson audio");
-      };
-      setVoiceStatus("Playing Benson in browser…");
-      await audio.play();
-    } catch (error) {
-      setSpeaking(false);
-      setVoiceStatus(error instanceof Error ? `Benson voice error: ${error.message}` : "Benson voice error");
-    }
   };
 
   const createStreamingTtsSpeaker = async (responseTurn) => {
@@ -819,8 +794,8 @@ export default function JarvisPage() {
 
     const stop = () => {
       activeResponseTurnRef.current += 1;
-      try { ws.send(JSON.stringify({ stop: true })); } catch {}
-      try { ws.close(); } catch {}
+      try { ws.send(JSON.stringify({ stop: true })); } catch { /* best-effort shutdown */ }
+      try { ws.close(); } catch { /* best-effort shutdown */ }
       void ctx.close();
     };
 
@@ -1090,6 +1065,8 @@ export default function JarvisPage() {
         const levels = new Uint8Array(analyser.fftSize);
         let heardVoice = false;
         let quietSince = 0;
+        // Voice endpoint timing begins in this user-triggered async callback, not during render.
+        // eslint-disable-next-line react-hooks/purity
         const startedAt = performance.now();
         const watchSilence = () => {
           analyser.getByteTimeDomainData(levels);
@@ -1172,7 +1149,7 @@ export default function JarvisPage() {
   }, []);
 
   return (
-    <div className="dashboard-shell">
+    <div className={`dashboard-shell${reducedMotion ? " motion-reduced" : ""}`}>
       <header className="dashboard-topbar">
         <div className="dashboard-brand">
           <Orbit aria-hidden="true" />
@@ -1198,6 +1175,46 @@ export default function JarvisPage() {
           <time dateTime={new Date().toISOString()}>{new Date().toLocaleString([], { month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
         </div>
       </header>
+
+      <section className="status-ribbon" aria-label="Benson operational status">
+        <div data-tone={overviewError ? "red" : "green"}>
+          <Activity aria-hidden="true" />
+          <span>Dashboard<small>{dashboardState}</small></span>
+        </div>
+        <div data-tone={gatewayState === "running" ? "green" : "amber"}>
+          <Radio aria-hidden="true" />
+          <span>Gateway<small>{gatewayState}</small></span>
+        </div>
+        <div data-tone={cpuPercent >= 90 ? "red" : cpuPercent >= 75 ? "amber" : "cyan"}>
+          <Cpu aria-hidden="true" />
+          <span>CPU<small>{cpuPercent}%</small></span>
+        </div>
+        <div data-tone={ramPercent >= 90 ? "red" : ramPercent >= 75 ? "amber" : "cyan"}>
+          <MemoryStick aria-hidden="true" />
+          <span>Memory<small>{ramPercent}%</small></span>
+        </div>
+        <div data-tone={diskPercent >= 90 ? "red" : diskPercent >= 75 ? "amber" : "cyan"}>
+          <HardDrive aria-hidden="true" />
+          <span>Disk<small>{diskPercent}%</small></span>
+        </div>
+        <div data-tone={networkHealth?.interfaces_up ? "green" : "amber"}>
+          <Network aria-hidden="true" />
+          <span>Network<small>{formatCount(networkHealth?.interfaces_up)}/{formatCount(networkHealth?.interfaces_total)} up</small></span>
+        </div>
+        <button
+          type="button"
+          className={reducedMotion ? "is-active" : ""}
+          aria-pressed={reducedMotion}
+          onClick={() => {
+            const next = !reducedMotion;
+            setReducedMotion(next);
+            window.localStorage.setItem("benson-reduced-motion", String(next));
+          }}
+        >
+          <Accessibility aria-hidden="true" />
+          <span>Motion<small>{reducedMotion ? "Reduced" : "Standard"}</small></span>
+        </button>
+      </section>
 
       <main className="dashboard-grid">
         <aside className="agent-ops-panel hud-panel" id="agent-ops">
@@ -1258,6 +1275,7 @@ export default function JarvisPage() {
             speaking={speaking}
             activeNode={activeNode}
             nodes={liveNodes}
+            reducedMotion={reducedMotion}
             onSelectNode={setActiveNode}
             onToggleSpeaking={toggleBrowserListening}
           />

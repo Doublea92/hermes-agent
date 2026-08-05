@@ -807,6 +807,7 @@ def build_jarvis_overview(
             "disk_percent": ((system_stats or {}).get("disk") or {}).get("percent"),
             "uptime_seconds": (system_stats or {}).get("uptime_seconds"),
             "psutil": (system_stats or {}).get("psutil"),
+            "network": (system_stats or {}).get("network"),
         },
         "cron": _summarize_cron(cron_jobs),
     }

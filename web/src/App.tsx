@@ -157,6 +157,7 @@ const CHAT_NAV_ITEM: NavItem = {
  */
 const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
+  "/benson": RootRedirect,
   "/jarvis": JarvisPage,
   "/jarvis/memory": JarvisMemoryPage,
   "/jarvis/agents": JarvisAgentsPage,
