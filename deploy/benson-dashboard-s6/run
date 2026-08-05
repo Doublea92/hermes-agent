@@ -1,0 +1,14 @@
+#!/command/with-contenv sh
+set -eu
+
+export HOME=/opt/data
+export PYTHONPATH=/opt/data/hermes-agent${PYTHONPATH:+:$PYTHONPATH}
+export HERMES_WEB_DIST=/opt/data/hermes-agent/hermes_cli/web_dist
+export HERMES_DASHBOARD_HOST="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
+export HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-8765}"
+
+cd /opt/data/hermes-agent
+exec s6-setuidgid hermes /opt/hermes/.venv/bin/python -m hermes_cli.main dashboard \
+  --host "$HERMES_DASHBOARD_HOST" \
+  --port "$HERMES_DASHBOARD_PORT" \
+  --no-open

@@ -1,0 +1,136 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const source = readFileSync(new URL("./JarvisPage.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("./jarvis-dashboard.css", import.meta.url), "utf8");
+
+describe("JarvisPage prototype dashboard integration", () => {
+  it("uses the approved repository dashboard as the main Jarvis route", () => {
+    expect(source).toContain("Neural command field");
+    expect(source).toContain("Hermes OS");
+    expect(source).toContain("Jarvis");
+    expect(source).toContain("VoiceCoreField");
+    expect(source).toContain("dashboard-shell");
+    expect(css).toContain(".dashboard-shell");
+    expect(css).toContain(".command-center");
+    expect(appSource).toContain('"/benson": RootRedirect');
+  });
+
+  it("keeps Memory and Agent Operations as distinct primary screens under /jarvis", () => {
+    expect(source).toContain('["Dashboard", LayoutDashboard, "/jarvis"]');
+    expect(source).toContain('["Memory", Network, "/jarvis/memory"]');
+    expect(source).toContain('["Agents", UsersRound, "/jarvis/agents"]');
+    expect(source).toContain('["Vault", Box, "/jarvis/memory"]');
+    expect(source).toContain('to="/jarvis/agents"');
+    expect(source).toContain('to="/jarvis/memory"');
+    expect(source).not.toContain('href="/agents"');
+    expect(source).not.toContain('href="/memory"');
+    expect(source).not.toContain('href="/jarvis');
+  });
+
+  it("preserves the approved Jarvis visual layout concepts", () => {
+    expect(source).toContain("Agent Ops");
+    expect(source).toContain("Data Vault");
+    expect(source).toContain("System Events");
+    expect(source).toContain("Production deployment requires operator review");
+    expect(source).toContain("jarvis:voice-frame");
+    expect(source).toContain("api.speakText");
+    expect(source).toContain("api.transcribeAudio");
+    expect(source).toContain("navigator.mediaDevices.getUserMedia");
+    expect(source).toContain("new MediaRecorder");
+    expect(source).toContain("startBrowserListening(true)");
+    expect(source).toContain("Open activation arming mic");
+    expect(source).toContain("Open mic listening");
+    expect(source).toContain("requestAnimationFrame(watchSilence)");
+    expect(source).toContain("summarizeVoiceTrace");
+    expect(source).toContain("recordVoiceMark");
+    expect(source).toContain("jarvis:voice-latency");
+    expect(source).toContain("VOICE_STAGE_LABELS");
+    expect(source).toContain("setMicLevel(normalized)");
+    expect(css).toContain(".voice-meter");
+    expect(css).toContain(".voice-latency-panel");
+    expect(source).toContain("Benson is listening again");
+    expect(source).toContain('gw.request("prompt.submit"');
+    expect(source).toContain("new Audio(response.data_url)");
+    expect(source).toContain("voiceSettingsRef");
+    expect(source).toContain("silenceMs: 1300");
+    expect(source).toContain("interruptAssistantSpeech");
+    expect(source).toContain("barge_in_interrupt");
+    expect(source).toContain("Toggle Jarvis open voice conversation");
+    expect(source).toContain("activeResponseTurnRef");
+    expect(source).toContain("api.getAudioPerformance()");
+    expect(source).toContain("backendVoicePerf");
+    expect(source).toContain("voice-backend-latency");
+    expect(css).toContain(".voice-backend-latency");
+    expect(source).toContain("api.buildWsUrl(\"/api/audio/speak-stream\")");
+    expect(source).toContain("new WebSocket(url)");
+    expect(source).toContain("tts_stream_fallback");
+    expect(source).toContain("speakFinalResponseFallback");
+    expect(source).toContain("playThinkingAcknowledgment");
+    expect(source).toContain("Let me check.");
+    expect(source).toContain('source: "jarvis_browser_voice"');
+    expect(source).toContain("Int16Array(event.data)");
+    expect(source).toContain("Benson streaming response");
+    expect(source).toContain("/api/audio/speak-stream:first_chunk");
+    expect(source).toContain("VOICE_MODE_CONFIG");
+    expect(source).toContain("Voice-fast mode");
+    expect(source).toContain("Voice-balanced mode");
+    expect(source).toContain("Voice-quality mode");
+    expect(source).toContain("buildVoicePrompt");
+    expect(source).toContain("voice_mode");
+    expect(source).toContain("voice-mode-control");
+    expect(css).toContain(".voice-mode-control");
+    expect(source).toContain("voiceTurns");
+    expect(source).toContain("appendVoiceTurn");
+    expect(source).toContain("voice-rolling-transcript");
+    expect(css).toContain(".voice-rolling-transcript");
+    expect(source).toContain("wakePhrase");
+    expect(source).toContain("requireWakePhrase");
+    expect(source).toContain("navigator.wakeLock.request(\"screen\")");
+    expect(source).toContain("wake_phrase_skipped");
+    expect(css).toContain(".voice-wake-control");
+    expect(source).toContain("FREE_BENSON_VOICES");
+    expect(source).toContain("en-US-BrianNeural");
+    expect(source).toContain("current streaming default");
+    expect(source).toContain("selectedVoiceOptions");
+    expect(source).toContain("previewSelectedVoice");
+    expect(source).toContain("voice-free-selector");
+    expect(source).toContain("free_voice_selected");
+    expect(source).toContain("tts_stream_skipped_for_voice");
+    expect(css).toContain(".voice-free-selector");
+    expect(source).toContain("Open activation ready");
+    expect(css).toContain(".browser-voice-console");
+    expect(source).toContain("prefers-reduced-motion: reduce");
+    expect(css).toContain("grid-template-columns: 250px minmax(650px, 1fr) 245px");
+  });
+
+  it("wires live Jarvis overview data into the visible dashboard panels", () => {
+    expect(source).toContain("api.getJarvisOverview()");
+    expect(source).toContain("memoryVault?.note_count");
+    expect(source).toContain("memoryVault?.decision_count");
+    expect(source).toContain("memoryVault?.product_note_count");
+    expect(source).toContain("serviceHealth?.system?.cpu_percent");
+    expect(source).toContain("agentStatus?.active_sessions");
+    expect(source).toContain("liveAgentOps(overview)");
+    expect(source).toContain("overview?.agent_status?.profiles");
+    expect(source).not.toContain("<strong>1.8 TB</strong>");
+    expect(source).not.toContain("<strong>12,842</strong>");
+    expect(source).not.toContain("<strong>184</strong>");
+  });
+
+  it("surfaces explicit operational health and a persistent reduced-motion control", () => {
+    expect(source).toContain('aria-label="Benson operational status"');
+    expect(source).toContain("Dashboard<small>{dashboardState}");
+    expect(source).toContain("Gateway<small>{gatewayState}");
+    expect(source).toContain("CPU<small>{cpuPercent}%");
+    expect(source).toContain("Memory<small>{ramPercent}%");
+    expect(source).toContain("Disk<small>{diskPercent}%");
+    expect(source).toContain("Network<small>");
+    expect(source).toContain('window.localStorage.setItem("benson-reduced-motion"');
+    expect(source).toContain("reducedMotion={reducedMotion}");
+    expect(css).toContain(".status-ribbon");
+    expect(css).toContain(".motion-reduced");
+    expect(css).toContain("@media (max-width: 1400px)");
+  });
+});

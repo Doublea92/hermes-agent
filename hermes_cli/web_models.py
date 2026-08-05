@@ -292,6 +292,9 @@ class DebugShareRequest(BaseModel):
 
 class TTSSpeakRequest(BaseModel):
     text: str
+    provider: Optional[str] = None
+    voice: Optional[str] = None
+    speed: Optional[float] = None
 
 
 # --- from web_server.py (originally lines 11549-11551) ---
