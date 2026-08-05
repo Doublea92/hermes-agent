@@ -47,10 +47,14 @@ SITE=$(/opt/hermes/.venv/bin/python -c 'import site; print(site.getsitepackages(
 PYTHONPATH=.:$SITE uv run --no-project --with pytest python -m pytest -q tests/hermes_cli/test_jarvis_overview.py
 ```
 
+## Nightly incremental development
+
+Cron job `2ae81d8dabc3` ticks at `05:00` and `06:00` UTC and uses an America/Detroit 1:00 AM guard; only one tick performs work across daylight-saving transitions. Each active run selects one small change, enforces branch/dirty-tree/approval gates, tests before committing, and reports results. It may not merge, deploy, publish ports, alter credentials, or restart shared Hermes services.
+
 ## Current MVP capabilities
 
 - Benson landing route and responsive cockpit
-- Authenticated text and voice chat through Hermes Gateway
+- Authenticated text chat verified end to end through Hermes Gateway; voice controls use the existing Hermes audio APIs
 - Live date/time and explicit operational status ribbon
 - Dashboard, gateway, CPU, memory, disk, and network-interface health
 - Agent/task, approval, activity, service/integration, and memory panels

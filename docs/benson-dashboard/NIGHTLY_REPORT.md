@@ -49,6 +49,13 @@ Establish a verified Benson MVP baseline and add explicit operational visibility
 - Restart recovery: **passed** for an isolated Benson process stop/start and health check.
 - Backend log after restart: **no emitted errors**.
 
+### Nightly automation
+
+- Cron job `2ae81d8dabc3` created and enabled.
+- Schedule: `0 5,6 * * *` UTC with an exact 01:00 America/Detroit guard, making the active run DST-safe.
+- Scope: one controlled, tested enhancement on `feature/benson-dashboard`; no merge, push, deployment, port publication, credential change, production data change, external communication, or shared-service restart.
+- Roadmap: 20 idempotent Kanban items confirmed in triage state.
+
 ### Services restarted
 
 - Existing Hermes gateway: **not restarted**.
